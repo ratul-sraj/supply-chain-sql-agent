@@ -44,15 +44,15 @@ def canonical_hash(rows: list[dict], ordered: bool) -> str:
     return hashlib.sha256(json.dumps(vals, default=str).encode()).hexdigest()[:16]
 
 
-def load_questions() -> list[dict]:
-    with open(QUESTIONS, encoding="utf-8") as f:
+def load_questions(path: str | None = None) -> list[dict]:
+    with open(path or QUESTIONS, encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
 
 
-def run(planner_name: str) -> dict:
+def run(planner_name: str, questions_path: str | None = None) -> dict:
     db = SafeDB()
     agent = SQLAgent(db=db, planner=build_planner(planner_name))
-    questions = load_questions()
+    questions = load_questions(questions_path)
 
     per_q = []
     n_match = n_valid = n_repaired = 0
@@ -95,7 +95,7 @@ def run(planner_name: str) -> dict:
         "execution_accuracy": round(n_match / n, 4),
         "valid_sql_rate": round(n_valid / n, 4),
         "repair_rate": round(n_repaired / n, 4),
-        "mean_latency_ms": round(total_latency / n, 2),
+        "mean_latency_ms": round(total_latency / n, 3),
         "correct": n_match,
         "valid": n_valid,
         "repaired": n_repaired,
@@ -103,7 +103,7 @@ def run(planner_name: str) -> dict:
     }
 
 
-def write_report(metrics: dict) -> None:
+def write_report(metrics: dict, report_path: str | None = None) -> None:
     failures = [r for r in metrics["per_question"] if not r["matched"]]
     lines = [
         "# Evaluation report — supply-chain text-to-SQL agent",
@@ -146,7 +146,7 @@ def write_report(metrics: dict) -> None:
         "```",
         "",
     ]
-    with open(REPORT, "w", encoding="utf-8") as fh:
+    with open(report_path or REPORT, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines))
 
 
@@ -154,15 +154,21 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--planner", choices=["auto", "llm", "template"], default="template")
     ap.add_argument("--quiet", action="store_true")
+    ap.add_argument("--questions", default=QUESTIONS,
+                    help="question set (default: eval/questions.jsonl)")
+    ap.add_argument("--results", default=RESULTS,
+                    help="metrics output path (default: eval/results.json)")
+    ap.add_argument("--report", default=REPORT,
+                    help="markdown report path (default: eval/report.md)")
     a = ap.parse_args()
 
     t0 = time.monotonic()
-    metrics = run(a.planner)
+    metrics = run(a.planner, a.questions)
     metrics["wall_seconds"] = round(time.monotonic() - t0, 2)
 
-    with open(RESULTS, "w", encoding="utf-8") as f:
+    with open(a.results, "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2, ensure_ascii=False)
-    write_report(metrics)
+    write_report(metrics, a.report)
 
     if not a.quiet:
         print(json.dumps({k: v for k, v in metrics.items() if k != "per_question"}, indent=2))

@@ -532,6 +532,11 @@ class TemplatePlanner(BasePlanner):
             if score > best_score:
                 best, best_score = t, score
         if best is None:
+            # No template matched. A nearest-intent (char n-gram cosine)
+            # fallback was tried and removed: it raised valid-SQL rate from
+            # 15% to 90% on held-out paraphrases but scored 0 correct, because
+            # picking the nearest intent is not the same as producing the
+            # right aggregation. Refusing is more useful than a wrong number.
             # No template matched. Be explicit that the offline planner cannot
             # map this question rather than returning an unrelated result set
             # (e.g. sqlite_master) that would look like a real answer.

@@ -90,32 +90,43 @@ python -m sql_agent.agent --planner llm "which supplier has the highest rating?"
 With **no key**, everything still runs end-to-end on the deterministic
 `TemplatePlanner` — that is exactly how the evaluation below was produced.
 
-## Evaluation (measured, offline planner)
+## Evaluation (measured)
 
-40 natural-language questions with gold SQL, generated *after* the database so
-every gold query really runs. Execution accuracy compares the **result set**
-against gold (order-insensitive unless the gold query is ordered).
+Two question sets, reported separately on purpose. Gold SQL is executed against
+the real database, so expected hashes and row counts are ground truth, and
+execution accuracy compares the **result set** (order-insensitive unless the
+gold query is ordered).
 
-| Metric | Value |
-| --- | --- |
-| Execution accuracy (result-set match) | **100.0%** (40/40) |
-| Valid-SQL rate | **100.0%** (40/40) |
-| Self-repair rate | 0.0% (0/40) |
-| Mean latency | 0.4 ms / question |
+| Set | What it measures | Execution accuracy | Valid-SQL rate |
+| --- | --- | --- | --- |
+| `eval/questions.jsonl` (40) | **intent coverage** — questions written alongside the template router | 100.0% (40/40) | 100.0% |
+| `eval/heldout.jsonl` (20) | **generalisation** — independently phrased, never used to build the router | **0.0% (0/20)** | 15.0% (3/20) |
 
-*Offline `TemplatePlanner`.* The planner now routes all 40 questions to a
-matching intent — counts, group-bys, joins, late-shipment and OTIF metrics, plus
-the paraphrased, filtered-aggregation, extreme-value and distinct-count intents
-(*"which supplier has the highest rating?"*, *"how many purchase orders are
-still open?"*, *"average unit price by category"*, …) that previously fell
-through. Each template carries explicit `exclude` guards so a generic intent
-(e.g. *"how many shipments"*) does not steal a more specific filtered one
-(e.g. *"how many shipments were returned?"*). Questions the offline planner
-still cannot map return an **explicit unmapped-intent error** rather than an
-unrelated result set; run `python eval/run_eval.py --planner llm` with a key to
-compare against the LLM planner. Full per-question breakdown:
-[`eval/report.md`](eval/report.md), raw metrics:
-[`eval/results.json`](eval/results.json).
+The first row is a regression check, not a benchmark: the question set and the
+keyword router were built together, so scoring 100% only proves the router still
+covers its own intents. The second row is the honest number. On 20 paraphrases
+(*"How many consignments have not arrived yet?"*, *"Which month saw the largest
+order value?"*, *"What fraction of order lines arrived complete?"*) the offline
+planner abstains on 17 and produces a runnable-but-wrong statement on 3.
+
+That gap is the point of the project's architecture: **the planner is a
+swappable component, the value is the layer underneath** — the guarded execution
+boundary, the plan/observe/repair loop, the MCP surface, and an evaluation
+harness honest enough to publish a 0% row. A nearest-intent cosine fallback was
+tried and deleted: it lifted valid-SQL rate to 90% with 0 correct answers, which
+is worse than abstaining. With an API key, `--planner llm` replaces the router
+and the same harness measures it on the same two sets.
+
+Reproduce:
+
+```bash
+python eval/run_eval.py --planner template                          # coverage
+python eval/run_eval.py --planner template --questions eval/heldout.jsonl \
+       --results eval/heldout_results.json --report eval/heldout_report.md
+```
+
+Full per-question breakdowns: [`eval/report.md`](eval/report.md),
+[`eval/heldout_report.md`](eval/heldout_report.md).
 
 **Repair rate is 0% here on purpose:** the template planner emits one canned
 statement and never errs, so there is nothing to repair. The self-repair path is
@@ -154,7 +165,7 @@ mcp_server/server.py    stdio JSON-RPC 2.0 MCP server (zero deps)
 mcp_server/README.md    how to register it in Claude Desktop / any MCP client
 api/main.py             FastAPI: POST /ask, GET /schema, GET /health
 ui/app.py               Streamlit UI: SQL, result table, step trace
-eval/                   questions.jsonl (40), run_eval.py, report.md, results.json
+eval/                   questions.jsonl (40), heldout.jsonl (20), run_eval.py, build_heldout.py, reports
 tests/                  db guards, agent self-repair, MCP subprocess, API, eval
 docs/schema.md          full schema + the deliberate messiness
 ```

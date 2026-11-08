@@ -9,7 +9,7 @@
 | Execution accuracy (result-set match) | **100.0%** (40/40) |
 | Valid-SQL rate | 100.0% (40/40) |
 | Self-repair rate | 0.0% (0/40) |
-| Mean latency | 0.0 ms |
+| Mean latency | 0.4 ms |
 
 ## Per-question failures
 
